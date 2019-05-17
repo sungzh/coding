@@ -37,11 +37,10 @@ class Model(object):
         return vocab, len(vocab)
 
     def _init_iterator(self):
-        graph = tf.Graph()
-        with graph.as_default():
-            input_dataset = tf.data.TextLineDataset(self.input_file)
-            target_dataset = tf.data.TextLineDataset(self.target_file)
-            input_target_dataset = tf.data.Dataset.zip((input_dataset, target_dataset))
+
+        input_dataset = tf.data.TextLineDataset(self.input_file)
+        target_dataset = tf.data.TextLineDataset(self.target_file)
+        input_target_dataset = tf.data.Dataset.zip((input_dataset, target_dataset))
 
             vocab_table = lookup_ops.index_table_from_file(self.vocab_file, default_value=UNK_ID)
             eos_id = tf.cast(src_vocab_table.lookup(tf.constant(EOS)), tf.int32)

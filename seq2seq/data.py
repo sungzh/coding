@@ -12,12 +12,12 @@ UNK_ID = 0
 
 class data(object):
 
-    def __init__(self, input_files, target_files, vocab_files, batch_size):
+    def __init__(self, input_file, target_file, vocab_file, batch_size):
         self.ts1 = []
         self.ts2 = []
-        self.input_files = input_files
-        self.target_files = target_files
-        self.vocab_files = vocab_files
+        self.input_file = input_file
+        self.target_file = target_file
+        self.vocab_file = vocab_file
         self.batch_size = batch_size
 
     def readjson(self, filename):
