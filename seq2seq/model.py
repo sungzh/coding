@@ -4,6 +4,8 @@ import codecs
 import os
 import tensorflow as tf
 
+from tensorflow.python.ops import lookup_ops
+
 # word level special token
 UNK = "<unk>"
 SOS = "<s>"
@@ -20,7 +22,8 @@ class Model(object):
         self.mode = mode
         self.num_units = num_units
         self.batch_size = batch_size
-        self.vocabs, vocab_size = load_vocab(vocab_file)
+        self.vocab_table = lookup_ops.index_table_from_file(vocab_file, default_value=UNK_ID)
+        #self.vocabs, vocab_size = load_vocab(vocab_file)
 
         if self.mode == 'train':
             self._init_train()
@@ -38,24 +41,56 @@ class Model(object):
 
     def _init_iterator(self):
 
-        input_dataset = tf.data.TextLineDataset(self.input_file)
+        sos_id = tf.cast(src_vocab_table.lookup(tf.constant(SOS)), tf.int32)
+        eos_id = tf.cast(src_vocab_table.lookup(tf.constant(EOS)), tf.int32)
+
+
+        src_dataset = tf.data.TextLineDataset(self.src_file)
         target_dataset = tf.data.TextLineDataset(self.target_file)
-        input_target_dataset = tf.data.Dataset.zip((input_dataset, target_dataset))
+        src_target_dataset = tf.data.Dataset.zip((src_dataset, target_dataset))
 
-            vocab_table = lookup_ops.index_table_from_file(self.vocab_file, default_value=UNK_ID)
-            eos_id = tf.cast(src_vocab_table.lookup(tf.constant(EOS)), tf.int32)
+        output_buffer_size = self.batch_size * 1000
+        num_parallel_calls = 4
+        src_target_dataset = src_target_dataset.shuffle(output_buffer_size, reshuffle_each_iteration=True)
 
-            batched_dataset = input_target_dataset.padded_batch(
+        src_target_dataset = src_target_dataset.map(lambda src, tgt: (tf.string_split([src]).values, tf.string_split([tgt]).values),
+                num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+
+        src_target_dataset = src_target_dataset.map(lambda src, tgt: (tf.cast(self.vocab_table.lookup(src), tf.int32),
+            tf.cast(self.vocab_table.lookup(tgt), tf.int32)), num_parallel_calls=num_parallel_calls)
+
+        src_target_dataset = src_target_dataset.prefetch(output_buffer_size)
+
+        src_target_dataset = src_target_dataset.map(lambda src, tgt: (src,
+            tf.concat(([sos_id], tgt), 0),
+            tf.concat((tgt, [eos_id]), 0)),
+            num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+
+        src_target_dataset = src_target_dataset.map(lambda src, tgt_in, tgt_out: (
+            src, tgt_in, tgt_out, tf.size(src), tf.size(tgt_in)),
+            num_parallel_calls=num_parallel_calls)
+
+        src_target_dataset = src_target_dataset.prefetch(output_buffer_size)
+
+
+        batched_dataset = input_target_dataset.padded_batch(
                 self.batch_size,
-                padded_shapes=((tf.TensorShape([None]),  # source vectors of unknown size
-                    tf.TensorShape([])),     # size(source)
-                    (tf.TensorShape([None]),  # target vectors of unknown size
-                    tf.TensorShape([]))),    # size(target)
-                padding_values=((eos_id,  # source vectors padded on the right with src_eos_id
-                    0),          # size(source) -- unused
-                    (eos_id,  # target vectors padded on the right with tgt_eos_id
-                    0)))         # size(target) -- unused
-            batched_iterator = batched_dataset.make_initializable_iterator()
+                padded_shapes=(
+                    tf.TensorShape([None]),  # src
+                    tf.TensorShape([None]),  # tgt_input
+                    tf.TensorShape([None]),  # tgt_output
+                    tf.TensorShape([]),  # src_len
+                    tf.TensorShape([])),  # tgt_len
+                # Pad the source and target sequences with eos tokens.
+                # (Though notice we don't generally need to do this since
+                # later on we will be masking out calculations past the true sequence.
+                padding_values=(
+                    src_eos_id,  # src
+                    tgt_eos_id,  # tgt_input
+                    tgt_eos_id,  # tgt_output
+                    0,  # src_len -- unused
+                    0))  # tgt_len -- unused
+        batched_iterator = batched_dataset.make_initializable_iterator()
         return batched_iterator
 
 
